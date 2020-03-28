@@ -9,12 +9,14 @@ import android.widget.CompoundButton;
 import android.widget.Switch;
 
 import com.wislie.hook.helper.HookStartActivityHelper;
+import com.wislie.hook.helper.LifeCycleListenerHelper;
 
 public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
         setContentView(R.layout.activity_main);
 
         final Switch aSwitch = findViewById(R.id.switch_login);
@@ -39,8 +41,12 @@ public class MainActivity extends AppCompatActivity {
                 startActivity(new Intent(MainActivity.this, TestActivity.class));
             }
         });
+        //hook activity的生命周期
+        LifeCycleListenerHelper.hook(this);
 
         //hook startActivity
         HookStartActivityHelper.hookStartActivity(this);
+
+
     }
 }
