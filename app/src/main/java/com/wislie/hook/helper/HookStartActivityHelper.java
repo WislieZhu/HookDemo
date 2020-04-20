@@ -36,90 +36,194 @@ public class HookStartActivityHelper {
     /**
      * 启动Activity
      */
-    public static void hookStartActivity(final Context context) {
+    public static void hookStartActivity(Context context) {
+        AndroidBase androidBase = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            androidBase = new AndroidQ();
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            androidBase = new AndroidO();
+        } else { //小于sdk 26
+            androidBase = new AndroidOLower();
+        }
+        androidBase.build(context);
+    }
 
-        try {
-            Field iActivityManagerSingletonField = null;
+    abstract static class AndroidBase {
+
+        abstract Field createActivityManagerSingletonField();
+
+        Object createActivityManagerSingleton() {
+            //因为是静态变量,可以get直接得到属性值
+            Field iActivityManagerSingletonField = createActivityManagerSingletonField();
             Object iActivityManagerSingleton = null;
+            try {
+                iActivityManagerSingleton = iActivityManagerSingletonField.get("");
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+            return iActivityManagerSingleton;
+        }
 
-            Class<?> activityManagerClass = null;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // 得到ActivityTaskManager的class
-                Class<?> activityTaskManagerClass = Class.forName("android.app.ActivityTaskManager");
+        abstract Class<?> createActivityManagerClass();
+
+        public void build(final Context context) {
+            Object iActivityManagerSingleton = createActivityManagerSingleton();
+
+            Class<?> activityManagerClass = createActivityManagerClass();
+            //得到IActivityManager属性所在的class
+            Class<?> singletonClass = null;
+            try {
+                singletonClass = Class.forName("android.util.Singleton");
+                //得到IActivityManager属性
+                Field mInstanceField = singletonClass.getDeclaredField("mInstance");
+                mInstanceField.setAccessible(true);
+                //singletonClass获取get()方法
+                Method getMethod = singletonClass.getDeclaredMethod("get");
+                getMethod.setAccessible(true);
+                //获取mInstanceField的值
+                final Object mInstance = getMethod.invoke(iActivityManagerSingleton);
+                Object proxy = Proxy.newProxyInstance(singletonClass.getClassLoader(), new Class[]{activityManagerClass}, new InvocationHandler() {
+                    @Override
+                    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                        Log.i(TAG, "invoke: methodName=" + method.getName());
+                        if ("startActivity".equals(method.getName())) {
+                            if (!isLogin) {
+                                Toast.makeText(context.getApplicationContext(), "未登录", Toast.LENGTH_SHORT).show();
+                                Intent intent = null;
+                                for (int i = 0; i < args.length; i++) {
+                                    if (args[i] instanceof Intent) {
+                                        intent = (Intent) args[i];
+                                        break;
+                                    }
+                                }
+                                if (intent != null) {
+                                    intent.setClassName("com.wislie.hook",
+                                            "com.wislie.hook.LoginActivity");
+                                }
+                            }
+                        }
+                        return method.invoke(mInstance, args);
+                    }
+                });
+                //将代理对象代替mInstance对象
+                mInstanceField.set(iActivityManagerSingleton, proxy);
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            } catch (InvocationTargetException e) {
+                e.printStackTrace();
+            } catch (NoSuchMethodException e) {
+                e.printStackTrace();
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            } catch (NoSuchFieldException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    /**
+     * android 26以下
+     */
+    static class AndroidOLower extends AndroidBase {
+
+        @Override
+        Field createActivityManagerSingletonField() {
+            // 得到ActivityManagerNative的class
+            Class<?> activityManagerNativeClass = null;
+            try {
+                activityManagerNativeClass = Class.forName("android.app.ActivityManagerNative");
+                //获取gDefault属性
+                Field iActivityManagerSingletonField = activityManagerNativeClass.getDeclaredField("gDefault");
+                iActivityManagerSingletonField.setAccessible(true);
+                return iActivityManagerSingletonField;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            } catch (NoSuchFieldException e) {
+                e.printStackTrace();
+            }
+            return null;
+        }
+
+        @Override
+        Class<?> createActivityManagerClass() {
+            //获取IActivityManager接口
+            try {
+                Class<?> activityManagerClass = Class.forName("android.app.IActivityManager");
+                return activityManagerClass;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Android [26,29)
+     */
+    static class AndroidO extends AndroidBase {
+
+        @Override
+        Field createActivityManagerSingletonField() {
+            //得到IActivityManagerSingleton属性
+            Field iActivityManagerSingletonField = null;
+            try {
+                iActivityManagerSingletonField = ActivityManager.class.getDeclaredField("IActivityManagerSingleton");
+                iActivityManagerSingletonField.setAccessible(true);
+                return iActivityManagerSingletonField;
+            } catch (NoSuchFieldException e) {
+                e.printStackTrace();
+            }
+            return null;
+        }
+
+        @Override
+        Class<?> createActivityManagerClass() {
+            //获取IActivityManager接口
+            try {
+                Class<?> activityManagerClass = Class.forName("android.app.IActivityManager");
+                return activityManagerClass;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Android 29及以上
+     */
+    static class AndroidQ extends AndroidBase {
+
+        @Override
+        Field createActivityManagerSingletonField() {
+            // 得到ActivityTaskManager的class
+            Class<?> activityTaskManagerClass = null;
+            Field iActivityManagerSingletonField = null;
+            try {
+                activityTaskManagerClass = Class.forName("android.app.ActivityTaskManager");
                 //得到IActivityTaskManagerSingleton属性
                 iActivityManagerSingletonField = activityTaskManagerClass.getDeclaredField("IActivityTaskManagerSingleton");
                 iActivityManagerSingletonField.setAccessible(true);
-                //因为是静态变量,可以get直接得到属性值
-                iActivityManagerSingleton = iActivityManagerSingletonField.get("");
-                //获取IActivityTaskManager接口
-                activityManagerClass = Class.forName("android.app.IActivityTaskManager");
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                //得到IActivityManagerSingleton属性
-                iActivityManagerSingletonField = ActivityManager.class.getDeclaredField("IActivityManagerSingleton");
-                iActivityManagerSingletonField.setAccessible(true);
-                //因为是静态变量,可以get直接得到属性值
-                iActivityManagerSingleton = iActivityManagerSingletonField.get("");
-                //获取IActivityManager接口
-                activityManagerClass = Class.forName("android.app.IActivityManager");
-            } else { //小于sdk 26
-                // 得到ActivityManagerNative的class
-                Class<?> activityManagerNativeClass = Class.forName("android.app.ActivityManagerNative");
-                //获取gDefault属性
-                iActivityManagerSingletonField = activityManagerNativeClass.getDeclaredField("gDefault");
-                iActivityManagerSingletonField.setAccessible(true);
-                //因为是静态变量,可以get直接得到属性值
-                iActivityManagerSingleton = iActivityManagerSingletonField.get("");
-
-                //获取IActivityManager接口
-                activityManagerClass = Class.forName("android.app.IActivityManager");
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            } catch (NoSuchFieldException e) {
+                e.printStackTrace();
             }
+            return iActivityManagerSingletonField;
+        }
 
-            //得到IActivityManager属性所在的class
-            Class<?> singletonClass = Class.forName("android.util.Singleton");
-            //得到IActivityManager属性
-            Field mInstanceField = singletonClass.getDeclaredField("mInstance");
-            mInstanceField.setAccessible(true);
-            //singletonClass获取get()方法
-            Method getMethod = singletonClass.getDeclaredMethod("get");
-            getMethod.setAccessible(true);
-            //获取mInstanceField的值
-            final Object mInstance = getMethod.invoke(iActivityManagerSingleton);
-
-            Object proxy = Proxy.newProxyInstance(singletonClass.getClassLoader(), new Class[]{activityManagerClass}, new InvocationHandler() {
-                @Override
-                public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                    Log.i(TAG, "invoke: methodName=" + method.getName());
-                    if ("startActivity".equals(method.getName())) {
-                        if (!isLogin) {
-                            Toast.makeText(context.getApplicationContext(), "未登录", Toast.LENGTH_SHORT).show();
-                            Intent intent = null;
-                            for (int i = 0; i < args.length; i++) {
-                                if (args[i] instanceof Intent) {
-                                    intent = (Intent) args[i];
-                                    break;
-                                }
-                            }
-                            if (intent != null) {
-                                intent.setClassName("com.wislie.hook",
-                                        "com.wislie.hook.LoginActivity");
-                            }
-                        }
-                    }
-                    return method.invoke(mInstance, args);
-                }
-            });
-            //将代理对象代替mInstance对象
-            mInstanceField.set(iActivityManagerSingleton, proxy);
-        } catch (NoSuchFieldException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
-        } catch (NoSuchMethodException e) {
-            e.printStackTrace();
-        } catch (InvocationTargetException e) {
-            e.printStackTrace();
+        @Override
+        Class<?> createActivityManagerClass() {
+            //获取IActivityTaskManager接口
+            try {
+                Class<?> activityManagerClass = Class.forName("android.app.IActivityTaskManager");
+                return activityManagerClass;
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+            return null;
         }
     }
 }
+
+
